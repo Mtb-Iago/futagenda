@@ -1,0 +1,11 @@
+{
+    "name": "futAgenda",
+    "short_name": "futAgenda",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#111827",
+    "theme_color": "#10b981",
+    "icons": [
+      { "src": "https://cdn-icons-png.flaticon.com/512/53/53283.png", "sizes": "512x512", "type": "image/png" }
+    ]
+  }

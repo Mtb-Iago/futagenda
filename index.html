@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="/styles.css">
+    <title>futAgenda</title>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+    <header class="sticky top-0 z-10 bg-gray-900/80 backdrop-blur border-b border-gray-800">
+        <div class="max-w-3xl mx-auto p-4 flex items-center gap-3">
+            <div class="flex-1">
+                <h1 class="text-xl font-bold text-green-400 leading-tight flex items-center gap-2">
+                    <span class="text-2xl leading-none select-none" aria-hidden="true">⚽</span>
+                    <span>futAgenda</span>
+                </h1>
+                <div class="flex items-center gap-2 text-xs text-gray-400">
+                    <span id="contador"></span>
+                </div>
+            </div>
+        </div>
+        <div class="max-w-3xl mx-auto px-4 pb-3 flex items-center justify-center gap-2">
+            <button
+                id="dia-anterior"
+                type="button"
+                class="rounded-xl border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none"
+                aria-label="Dia anterior"
+            >
+                ←
+            </button>
+            <span id="label-dia" class="min-w-[12rem] text-center text-sm text-gray-200 font-medium"></span>
+            <button
+                id="dia-seguinte"
+                type="button"
+                class="rounded-xl border border-gray-600 bg-gray-800 px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none"
+                aria-label="Próximo dia"
+            >
+                →
+            </button>
+        </div>
+        <div class="max-w-3xl mx-auto px-4 pb-4">
+            <label class="block text-xs text-gray-400 mb-2" for="busca">
+                Buscar por time ou competição
+            </label>
+            <div class="relative">
+                <input
+                    id="busca"
+                    type="search"
+                    placeholder="Ex.: Flamengo, Palmeiras, Champions…"
+                    class="w-full rounded-xl bg-gray-800 border border-gray-700 px-4 py-3 pr-10 text-sm outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500"
+                    autocomplete="off"
+                />
+                <button
+                    id="limpar"
+                    type="button"
+                    class="hidden absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
+                    aria-label="Limpar busca"
+                >
+                    Limpar
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto p-4">
+        <div id="estado" class="text-center text-gray-500 py-10">
+            Carregando partidas de hoje…
+        </div>
+        <section id="lista-jogos" class="space-y-3 hidden">
+        <p class="text-center text-gray-500">Carregando partidas de hoje...</p>
+        </section>
+    </main>
+
+    <div
+        id="modal-detalhes"
+        class="hidden fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/60 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-detalhes-titulo"
+    >
+        <div
+            id="modal-detalhes-surface"
+            class="flex min-h-full w-full items-center justify-center p-4"
+        >
+            <div
+                id="modal-detalhes-panel"
+                class="flex w-full max-w-lg max-h-[min(85vh,100dvh-2rem)] flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-800 shadow-xl"
+            >
+                <div class="flex shrink-0 items-start justify-between gap-3 border-b border-gray-700 p-4">
+                    <div class="min-w-0">
+                        <h2 id="modal-detalhes-titulo" class="text-base font-semibold text-white leading-snug"></h2>
+                        <p id="modal-detalhes-sub" class="mt-1 text-xs text-gray-400"></p>
+                    </div>
+                    <button
+                        type="button"
+                        id="modal-detalhes-fechar"
+                        class="shrink-0 rounded-lg border border-gray-600 bg-gray-900 px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700"
+                        aria-label="Fechar detalhes"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <div
+                    id="modal-detalhes-corpo"
+                    class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 text-sm text-gray-200"
+                ></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const $lista = document.getElementById('lista-jogos');
+        const $estado = document.getElementById('estado');
+        const $busca = document.getElementById('busca');
+        const $limpar = document.getElementById('limpar');
+        const $contador = document.getElementById('contador');
+        const $labelDia = document.getElementById('label-dia');
+        const $btnDiaAnt = document.getElementById('dia-anterior');
+        const $btnDiaSeg = document.getElementById('dia-seguinte');
+        const $modal = document.getElementById('modal-detalhes');
+        const $modalSurface = document.getElementById('modal-detalhes-surface');
+        const $modalFechar = document.getElementById('modal-detalhes-fechar');
+        const $modalTitulo = document.getElementById('modal-detalhes-titulo');
+        const $modalSub = document.getElementById('modal-detalhes-sub');
+        const $modalCorpo = document.getElementById('modal-detalhes-corpo');
+
+        const TZ = 'America/Sao_Paulo';
+        const MAX_DAY_OFFSET = 7;
+
+        let dayOffset = 0;
+        let jogosCarregados = [];
+        let jogosFiltrados = [];
+
+        function todayYmdInTz(timeZone) {
+            return new Intl.DateTimeFormat('en-CA', {
+                timeZone,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(new Date());
+        }
+
+        function addDaysToYmdInTz(ymd, days, timeZone) {
+            const [Y, M, D] = ymd.split('-').map(Number);
+            const utcMs = Date.UTC(Y, M - 1, D + days, 12, 0, 0);
+            return new Intl.DateTimeFormat('en-CA', {
+                timeZone,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(new Date(utcMs));
+        }
+
+        function selectedYmd() {
+            return addDaysToYmdInTz(todayYmdInTz(TZ), dayOffset, TZ);
+        }
+
+        function formatarLabelDia(ymd, offset) {
+            const [y, mo, d] = ymd.split('-').map(Number);
+            const dt = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0));
+            const long = dt.toLocaleDateString('pt-BR', {
+                timeZone: TZ,
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+            });
+            const cap = long.charAt(0).toUpperCase() + long.slice(1);
+            if (offset === 0) return `Hoje · ${cap}`;
+            if (offset === 1) return `Amanhã · ${cap}`;
+            return cap;
+        }
+
+        function atualizarNavegacaoDia() {
+            $labelDia.textContent = formatarLabelDia(selectedYmd(), dayOffset);
+            $btnDiaAnt.disabled = dayOffset <= 0;
+            $btnDiaSeg.disabled = dayOffset >= MAX_DAY_OFFSET;
+        }
+
+        function normalizar(txt) {
+            return (txt ?? '')
+                .toString()
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/\p{Diacritic}/gu, '');
+        }
+
+        function setContador(n) {
+            $contador.textContent = `${n} jogo${n === 1 ? '' : 's'}`;
+        }
+
+        function setEstado(html) {
+            $estado.innerHTML = html;
+            $estado.classList.remove('hidden');
+            $lista.classList.add('hidden');
+        }
+
+        function mostrarLista() {
+            $estado.classList.add('hidden');
+            $lista.classList.remove('hidden');
+        }
+
+        function escapeAttr(s) {
+            return (s ?? '')
+                .toString()
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;');
+        }
+
+        function escudo(logo, nome) {
+            const t = escapeAttr(nome);
+            const size = 'w-11 h-11 sm:w-9 sm:h-9';
+            if (!logo) {
+                return `<div title="${t}" class="${size} shrink-0 rounded-lg bg-gray-700/60 border border-gray-600 flex items-center justify-center text-[10px] text-gray-300">—</div>`;
+            }
+            return `<img src="${logo}" alt="${t}" title="${t}" class="${size} shrink-0 rounded-lg bg-white p-1 object-contain" loading="lazy" referrerpolicy="no-referrer" />`;
+        }
+
+        function temPlacar(jogo) {
+            return (
+                jogo.homeGoals !== null &&
+                jogo.homeGoals !== undefined &&
+                jogo.awayGoals !== null &&
+                jogo.awayGoals !== undefined
+            );
+        }
+
+        function rotuloStatus(statusShort) {
+            const s = statusShort || 'NS';
+            if (s === 'FT') return 'Final';
+            if (s === 'NS') return 'Não iniciado';
+            if (s === 'HT') return 'Intervalo';
+            if (s === '1H' || s === '2H') return 'Em jogo';
+            if (s === 'PEN') return 'Pênaltis';
+            if (s === 'AET') return 'Prorrogação';
+            return s;
+        }
+
+        function centroPlacarOuHorario(jogo) {
+            if (temPlacar(jogo)) {
+                const aoVivo = jogo.isLive
+                    ? '<span class="text-[10px] font-semibold uppercase tracking-wide text-amber-400">Ao vivo</span>'
+                    : '';
+                return `
+                    <div class="flex flex-col items-center justify-center gap-1 min-w-[4.5rem]">
+                        ${aoVivo}
+                        <div class="text-lg font-bold tabular-nums tracking-tight">${jogo.homeGoals} × ${jogo.awayGoals}</div>
+                        <div class="text-[10px] text-gray-500">${rotuloStatus(jogo.statusShort)}</div>
+                    </div>
+                `;
+            }
+            return `
+                <div class="flex flex-col items-center justify-center gap-0.5 text-gray-400 min-w-[4.5rem]">
+                    <span class="text-sm font-medium text-gray-300">${jogo.time}</span>
+                    <span class="text-[10px]">vs</span>
+                </div>
+            `;
+        }
+
+        function badgeDiaRelativo() {
+            if (dayOffset === 0) return 'Hoje';
+            if (dayOffset === 1) return 'Amanhã';
+            return `+${dayOffset} dias`;
+        }
+
+        function detalheGolPt(d) {
+            const m = {
+                'Normal Goal': 'Gol',
+                'Penalty': 'Pênalti',
+                'Own Goal': 'Gol contra',
+                'Free Kick': 'Falta',
+                'Header': 'Cabeceio',
+                'Missed Penalty': 'Pênalti perdido'
+            };
+            return m[d] || d || 'Gol';
+        }
+
+        function detalheCartaoPt(d) {
+            const m = {
+                'Yellow Card': 'Cartão amarelo',
+                'Red Card': 'Cartão vermelho',
+                'Second Yellow card': 'Segundo amarelo'
+            };
+            return m[d] || d || 'Cartão';
+        }
+
+        function isCartaoVermelho(d) {
+            const s = (d || '').toLowerCase();
+            return s.includes('red') || s.includes('second yellow');
+        }
+
+        function fecharModalDetalhes() {
+            $modal.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+        }
+
+        function abrirModalDetalhes() {
+            $modal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        }
+
+        function renderCorpoModalLoading() {
+            $modalCorpo.innerHTML =
+                '<p class="text-center text-gray-500 py-6">Carregando eventos da partida…</p>';
+        }
+
+        function renderCorpoModalErro(msg) {
+            $modalCorpo.innerHTML = `<p class="text-center text-red-300 py-4">${escapeAttr(msg)}</p>`;
+        }
+
+        function renderCorpoModalDados(data) {
+            const goals = Array.isArray(data.goals) ? data.goals : [];
+            const cards = Array.isArray(data.cards) ? data.cards : [];
+
+            let html = '';
+
+            html += '<section class="space-y-2">';
+            html +=
+                '<h3 class="text-xs font-semibold uppercase tracking-wide text-gray-400">Gols</h3>';
+            if (!goals.length) {
+                html +=
+                    '<p class="text-gray-500 text-sm">Nenhum gol registrado ainda (partida não começou ou sem dados na API).</p>';
+            } else {
+                html += '<ul class="space-y-2">';
+                for (const g of goals) {
+                    const assist = g.assistName
+                        ? `<span class="block text-xs text-gray-500 mt-0.5">Assist.: ${escapeAttr(g.assistName)}</span>`
+                        : '';
+                    html += `<li class="rounded-xl border border-gray-700 bg-gray-900/50 px-3 py-2 border-l-4 border-l-green-500">
+                        <div class="flex items-baseline justify-between gap-2">
+                            <span class="font-semibold text-green-300 tabular-nums shrink-0">${escapeAttr(g.minute)}</span>
+                            <span class="text-xs text-gray-400 truncate">${escapeAttr(g.team)}</span>
+                        </div>
+                        <div class="mt-1 font-medium">${escapeAttr(g.player)}</div>
+                        <div class="text-xs text-gray-500">${escapeAttr(detalheGolPt(g.detail))}</div>
+                        ${assist}
+                    </li>`;
+                }
+                html += '</ul>';
+            }
+            html += '</section>';
+
+            html += '<section class="space-y-2 pt-6 border-t border-gray-700">';
+            html +=
+                '<h3 class="text-xs font-semibold uppercase tracking-wide text-gray-400">Cartões</h3>';
+            if (!cards.length) {
+                html +=
+                    '<p class="text-gray-500 text-sm">Nenhum cartão registrado.</p>';
+            } else {
+                html += '<ul class="space-y-2">';
+                for (const c of cards) {
+                    const vermelho = isCartaoVermelho(c.detail);
+                    const bar = vermelho ? 'border-l-red-500' : 'border-l-amber-400';
+                    const rotulo = escapeAttr(detalheCartaoPt(c.detail));
+                    html += `<li class="rounded-xl border border-gray-700 bg-gray-900/50 px-3 py-2 border-l-4 ${bar}">
+                        <div class="flex items-baseline justify-between gap-2">
+                            <span class="font-semibold tabular-nums shrink-0 ${vermelho ? 'text-red-300' : 'text-amber-200'}">${escapeAttr(c.minute)}</span>
+                            <span class="text-xs text-gray-400 truncate">${escapeAttr(c.team)}</span>
+                        </div>
+                        <div class="mt-1 font-medium">${escapeAttr(c.player)}</div>
+                        <div class="text-xs text-gray-500">${rotulo}</div>
+                    </li>`;
+                }
+                html += '</ul>';
+            }
+            html += '</section>';
+
+            $modalCorpo.innerHTML = html;
+        }
+
+        async function abrirDetalhesPartida(jogo) {
+            if (jogo == null || jogo.fixtureId == null) return;
+
+            const fid = jogo.fixtureId;
+            const titulo = `${jogo.homeTeam} × ${jogo.awayTeam}`;
+            const sub = `${jogo.competition} · Às ${jogo.time}`;
+
+            $modalTitulo.textContent = titulo;
+            $modalSub.textContent = sub;
+            renderCorpoModalLoading();
+            abrirModalDetalhes();
+
+            try {
+                const res = await fetch(`/api/fixture-eventos?fixture=${fid}`, {
+                    cache: 'no-store'
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    renderCorpoModalErro(data?.error || 'Não foi possível carregar os eventos.');
+                    return;
+                }
+                renderCorpoModalDados(data);
+            } catch (err) {
+                renderCorpoModalErro('Falha de rede ao carregar detalhes.');
+            }
+        }
+
+        function cardJogo(jogo) {
+            const fid = jogo.fixtureId != null ? String(jogo.fixtureId) : '';
+            const clickAttr = fid
+                ? `data-fixture-id="${fid}" tabindex="0" role="button" aria-label="Ver detalhes da partida"`
+                : '';
+            return `
+                <article class="bg-gray-800/70 p-4 rounded-2xl shadow border border-gray-700 hover:border-gray-600 hover:border-green-500/40 transition cursor-pointer active:opacity-90" ${clickAttr}>
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <div class="text-xs text-gray-400 truncate">${jogo.competition}</div>
+                            ${temPlacar(jogo) ? `<div class="text-xs text-gray-500 mt-0.5">Às ${jogo.time}</div>` : ''}
+                        </div>
+                        <div class="shrink-0 text-xs px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-gray-300">
+                            ${badgeDiaRelativo()}
+                        </div>
+                    </div>
+
+                    <div class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-3">
+                        <div class="flex items-center gap-2 sm:gap-3 min-w-0 max-sm:justify-end sm:justify-start">
+                            ${escudo(jogo.homeLogo, jogo.homeTeam)}
+                            <div class="min-w-0 hidden sm:block">
+                                <div class="font-semibold truncate">${jogo.homeTeam}</div>
+                            </div>
+                        </div>
+
+                        ${centroPlacarOuHorario(jogo)}
+
+                        <div class="flex items-center gap-2 sm:gap-3 min-w-0 justify-end max-sm:justify-start sm:justify-end">
+                            <div class="min-w-0 text-right hidden sm:block">
+                                <div class="font-semibold truncate">${jogo.awayTeam}</div>
+                            </div>
+                            ${escudo(jogo.awayLogo, jogo.awayTeam)}
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-gray-700 flex items-start gap-2 text-sm">
+                        <span aria-hidden="true">📺</span>
+                        <div class="text-green-300 leading-snug">${jogo.channels}</div>
+                    </div>
+                </article>
+            `;
+        }
+
+        function renderJogos(jogos) {
+            jogosFiltrados = jogos;
+            setContador(jogosFiltrados.length);
+
+            if (!jogosFiltrados.length) {
+                setEstado(`
+                    <div class="text-gray-300 font-semibold">Nada por aqui.</div>
+                    <div class="text-sm text-gray-500 mt-2">Tente buscar por outro time/competição, ou volte mais tarde.</div>
+                `);
+                return;
+            }
+
+            $lista.innerHTML = jogosFiltrados.map(cardJogo).join('');
+            mostrarLista();
+        }
+
+        function aplicarFiltro() {
+            const q = normalizar($busca.value);
+            $limpar.classList.toggle('hidden', !q);
+
+            if (!q) {
+                renderJogos(jogosCarregados);
+                return;
+            }
+
+            const filtrados = jogosCarregados.filter(j =>
+                normalizar(j.homeTeam).includes(q) ||
+                normalizar(j.awayTeam).includes(q) ||
+                normalizar(j.competition).includes(q)
+            );
+            renderJogos(filtrados);
+        }
+
+        async function fetchJogos() {
+            try {
+                atualizarNavegacaoDia();
+                setEstado('Carregando partidas…');
+                const res = await fetch(`/api/jogos?offset=${dayOffset}`, { cache: 'no-store' });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    const msg = data?.error ? `${data.error}` : 'Erro ao carregar jogos';
+                    setEstado(`
+                        <div class="text-red-300 font-semibold">${msg}</div>
+                        <div class="text-sm text-gray-500 mt-2">Verifique sua API_KEY e tente novamente.</div>
+                    `);
+                    setContador(0);
+                    return;
+                }
+
+                jogosCarregados = Array.isArray(data) ? data : [];
+                atualizarNavegacaoDia();
+                if (normalizar($busca.value)) aplicarFiltro();
+                else renderJogos(jogosCarregados);
+            } catch (e) {
+                setEstado(`
+                    <div class="text-red-300 font-semibold">Falha de rede.</div>
+                    <div class="text-sm text-gray-500 mt-2">Não consegui acessar a API agora.</div>
+                `);
+                setContador(0);
+            }
+        }
+
+        $btnDiaAnt.addEventListener('click', () => {
+            if (dayOffset <= 0) return;
+            dayOffset -= 1;
+            fetchJogos();
+        });
+        $btnDiaSeg.addEventListener('click', () => {
+            if (dayOffset >= MAX_DAY_OFFSET) return;
+            dayOffset += 1;
+            fetchJogos();
+        });
+
+        $busca.addEventListener('input', aplicarFiltro);
+        $limpar.addEventListener('click', () => {
+            $busca.value = '';
+            aplicarFiltro();
+            $busca.focus();
+        });
+
+        $lista.addEventListener('click', (e) => {
+            const article = e.target.closest('article[data-fixture-id]');
+            if (!article) return;
+            const id = Number(article.dataset.fixtureId);
+            const jogo = jogosFiltrados.find((j) => j.fixtureId === id);
+            if (jogo) abrirDetalhesPartida(jogo);
+        });
+
+        $lista.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const article = e.target.closest('article[data-fixture-id]');
+            if (!article) return;
+            e.preventDefault();
+            const id = Number(article.dataset.fixtureId);
+            const jogo = jogosFiltrados.find((j) => j.fixtureId === id);
+            if (jogo) abrirDetalhesPartida(jogo);
+        });
+
+        function onFecharModal() {
+            fecharModalDetalhes();
+        }
+
+        $modal.addEventListener('click', (e) => {
+            if (e.target === $modal || e.target === $modalSurface) {
+                fecharModalDetalhes();
+            }
+        });
+        $modalFechar.addEventListener('click', onFecharModal);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !$modal.classList.contains('hidden')) {
+                fecharModalDetalhes();
+            }
+        });
+
+        atualizarNavegacaoDia();
+        fetchJogos();
+    </script>
+</body>
+</html>

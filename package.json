@@ -1,0 +1,17 @@
+{
+  "name": "futagenda",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tailwindcss -i ./src/input.css -o ./styles.css --minify",
+    "build:css": "npm run build",
+    "start": "node server.js",
+    "dev": "npm run build && node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}
